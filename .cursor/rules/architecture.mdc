@@ -13,9 +13,17 @@ description: アプリのアーキテクチャガイドライン
 ## 原則
 - 関心事の分離を維持
 - 単方向データフローを使用
-- 依存性注入（Hilt/Dagger）を活用
+- 依存性注入はHiltを使用（Google推奨のDIフレームワーク）
 - ViewModelでUIの状態を管理
 - コルーチンとFlowを使用した非同期処理
 - テスト可能なコードを書く
 
 UI更新はStateFlowやLiveDataを通じて行い、直接的なUI操作は避けてください。
+
+## 依存性注入（Hilt）
+- アプリケーションクラスに`@HiltAndroidApp`アノテーションを付与
+- アクティビティやフラグメントには`@AndroidEntryPoint`を使用
+- ViewModelは`@HiltViewModel`と`@Inject`コンストラクタを使用
+- モジュールは`@Module`と`@InstallIn`で適切なコンポーネントに注入
+- シングルトンは`@Singleton`スコープを使用
+- テスト時は`@HiltAndroidTest`でテスト専用の依存関係を注入

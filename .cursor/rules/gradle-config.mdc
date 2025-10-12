@@ -10,3 +10,21 @@ globs: *.gradle.kts,*.gradle
 - ビルドバリアントとフレーバーには適切な命名規則を使用
 - プラグインのバージョンは`plugins`ブロック内で指定
 - プロダクションコードとテストコードの依存関係を明確に分ける
+
+## Hilt設定
+- プロジェクトレベルの`build.gradle.kts`にHiltプラグインを追加：`id("com.google.dagger.hilt.android")`
+- アプリモジュールの`build.gradle.kts`にHiltプラグインを適用：`id("dagger.hilt.android.plugin")`
+- `libs.versions.toml`にHilt依存関係を追加：
+  ```toml
+  [versions]
+  hilt = "2.50" # 最新バージョンを使用
+
+  [libraries]
+  hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
+  hilt-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", version.ref = "hilt" }
+  ```
+- アプリモジュールの依存関係に追加：
+  ```kotlin
+  implementation(libs.hilt.android)
+  kapt(libs.hilt.compiler)
+  ```
