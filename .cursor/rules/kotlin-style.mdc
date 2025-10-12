@@ -1,0 +1,12 @@
+---
+globs: *.kt
+---
+# Kotlin コーディング規約
+
+- クラス名はPascalCase（例：`MainActivity`）
+- 関数名とプロパティ名はcamelCase（例：`getUserData()`）
+- 定数はSNAKE_CASE（例：`MAX_COUNT`）
+- 関数は短く、単一責任の原則に従うこと
+- コメントは必要な場合のみ追加し、KDocフォーマット（`/** */`）を使用すること
+- 可能な限りnullabilityを明示的に処理（`?.`、`?:`、`!!`）
+- コルーチンを使用して非同期処理を行うこと

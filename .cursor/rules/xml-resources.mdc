@@ -1,0 +1,17 @@
+---
+globs: *.xml
+---
+# XMLリソースファイル規約
+
+## レイアウト（layout/*.xml）
+- IDは`snake_case`形式（例：`text_username`）
+- 制約レイアウト（ConstraintLayout）を優先的に使用
+- ハードコードされた文字列や寸法を避け、代わりに`@string`や`@dimen`リソースを使用
+
+## 文字列（values/strings.xml）
+- キーは`snake_case`形式（例：`app_name`、`welcome_message`）
+- 必要に応じてフォーマット文字列（`%1$s`）を使用
+
+## 色（values/colors.xml）
+- 色名は意味に基づいて命名（例：`primary_color`、`background_dark`）
+- すべての色はテーマシステムを通じて参照

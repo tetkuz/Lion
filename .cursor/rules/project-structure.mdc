@@ -1,0 +1,13 @@
+---
+alwaysApply: true
+---
+# プロジェクト構造
+
+このプロジェクトは標準的なAndroid Studioプロジェクト構造に従っています。
+
+- `app/src/main/java/com/scrap/lion/` - Kotlinソースコードのメインディレクトリ
+- `app/src/main/res/` - リソースファイル（レイアウト、文字列、色など）
+- `app/src/main/AndroidManifest.xml` - アプリの設定ファイル
+- `app/build.gradle.kts` - アプリモジュールの依存関係と設定
+- `build.gradle.kts` - プロジェクトレベルの設定
+- `gradle/libs.versions.toml` - 依存関係のバージョン管理
