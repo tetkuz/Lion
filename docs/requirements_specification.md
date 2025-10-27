@@ -250,3 +250,22 @@ if (!swinging) {
     * 通信切断時のリカバリ処理があること
 * 拡張性
     * 将来的に他のセンサーに対応するために、デバイス依存の部分とそうでない部分が切り離されていること
+
+
+# 6. プラットフォーム / バージョン要件（Android）
+
+本アプリの対応およびビルド設定は Gradle 構成に基づき、以下の通りとする。
+
+- 対応OS（minSdk）: API 33（Android 13）以上
+- targetSdk: API 36
+- compileSdk: API 36
+- Java / Kotlin:
+  - Java 11（sourceCompatibility / targetCompatibility = 11）
+  - Kotlin 2.0.21（jvmTarget = 11）
+- ビルドツール:
+  - Android Gradle Plugin 8.13.0
+  - 依存管理: Version Catalog（`gradle/libs.versions.toml`）
+
+備考:
+- minSdk 33 を前提に BLE 権限やランタイム権限の取り扱いを設計する
+- targetSdk / compileSdk を更新する際は、各種権限・バックグラウンド挙動の互換性検証を行う
