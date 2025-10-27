@@ -58,14 +58,78 @@
 
 ## 主要ドメインモデルとポート
 
-- ドメインモデル（イメージ）
-  - `SensorSample(ax, ay, az, gx, gy, gz, timestamp)`
-  - `SwingEvent(start, end, wPerpMax, tipSpeed)`
-  - `SwingSettings(R = d_sweet - d_hand, thresholds, windows, gain)`
-
-- Ports（Repository/Service インターフェースの最小シグネチャ）
+- ドメインモデル（確定）
 ```kotlin
-interface SensorStreamPort { val frames: kotlinx.coroutines.flow.Flow<SensorSample> }
+// ベクトル（単位は利用側で明示）
+data class Vec3(val x: Float, val y: Float, val z: Float)
+
+// μs時刻、角速度はrad/s、加速度はm/s^2
+data class SensorSample(
+    val timestampMicros: Long,
+    val accel: Vec3,        // m/s^2
+    val gyroRadPerSec: Vec3 // rad/s
+)
+
+data class SwingSession(
+    val id: Long?,
+    val userId: Long,
+    val batProfileId: Long,
+    val startedAtMicros: Long,
+    val endedAtMicros: Long?,
+    val note: String?
+)
+
+data class SwingEvent(
+    val id: Long?,
+    val sessionId: Long,
+    val startedAtMicros: Long,
+    val endedAtMicros: Long,
+    val wPerpMaxRadPerSec: Float,
+    val tipSpeedMetersPerSec: Float,
+    val impactAngleRad: Float?,
+    val sampleRateHz: Float?
+)
+
+// イベント先頭からの相対μs
+data class SwingRawSample(
+    val eventId: Long,
+    val tRelMicros: Int,
+    val accel: Vec3,        // m/s^2
+    val gyroRadPerSec: Vec3 // rad/s
+)
+
+data class BatProfile(
+    val id: Long?,
+    val userId: Long,
+    val name: String,
+    val lengthMeters: Float,
+    val dHandMeters: Float,
+    val dSweetMeters: Float,
+    val gain: Float
+) { val radiusMeters: Float get() = dSweetMeters - dHandMeters }
+
+data class SwingSettings(
+    val startThresholdADyn: Float,     // m/s^2
+    val endThresholdADyn: Float,       // m/s^2
+    val endThresholdWPerp: Float,      // rad/s
+    val tRiseMillis: Int,
+    val tFallMillis: Int,
+    val refractoryPeriodMillis: Int
+)
+```
+
+- 不変条件
+  - `SwingEvent.startedAtMicros <= endedAtMicros`
+  - `0 <= SwingRawSample.tRelMicros <= (ended - started) * 1000`
+  - `BatProfile.radiusMeters > 0`、`gain > 0`
+
+- Ports（Repository/Service インターフェース）
+```kotlin
+interface SensorStreamPort {
+    val frames: kotlinx.coroutines.flow.Flow<SensorSample>
+    suspend fun startStreaming()
+    suspend fun stopStreaming()
+}
 
 interface ConnectionStatePort {
     val isScanning: kotlinx.coroutines.flow.StateFlow<Boolean>
@@ -73,27 +137,44 @@ interface ConnectionStatePort {
 }
 
 interface SwingDetectorPort {
-    /** 1サンプル入力で0..Nの SwingEvent を吐き出す（終了時に1つ発行想定） */
-    fun process(frame: SensorSample): List<SwingEvent>
     fun reset()
+    fun updateSettings(settings: SwingSettings, bat: BatProfile)
+    /** 1サンプル入力で0..N件の確定SwingEventを返す（終了時1件想定） */
+    fun process(sample: SensorSample): List<SwingEvent>
 }
 
-interface SwingRepository {
-    suspend fun save(event: SwingEvent)
-    fun list(): kotlinx.coroutines.flow.Flow<List<SwingEvent>>
+interface SessionRepository {
+    suspend fun startSession(userId: Long, batProfileId: Long, note: String? = null): Long
+    suspend fun endSession(sessionId: Long, endedAtMicros: Long)
+    fun observeActiveSession(): kotlinx.coroutines.flow.StateFlow<Long?>
+}
+
+interface SwingEventRepository {
+    suspend fun save(event: SwingEvent): Long
+    fun listBySession(sessionId: Long): kotlinx.coroutines.flow.Flow<List<SwingEvent>>
+}
+
+interface RawSampleRepository {
+    /** イベント期間内のRawを一括保存 */
+    suspend fun saveEventSamples(eventId: Long, samples: List<SwingRawSample>)
 }
 
 interface SettingsRepository {
-    fun load(): kotlinx.coroutines.flow.Flow<SwingSettings>
-    suspend fun update(value: SwingSettings)
+    fun loadSwingSettings(): kotlinx.coroutines.flow.Flow<SwingSettings>
+    suspend fun updateSwingSettings(value: SwingSettings)
+}
+
+interface BatProfileRepository {
+    suspend fun getActiveProfile(userId: Long): BatProfile
+    suspend fun save(profile: BatProfile): Long
 }
 ```
 
 - UseCase（責務例）
-  - `StartMeasuring` / `StopMeasuring`: 接続・購読の開始/停止
+  - `StartSession(userId, batProfileId, note?)` / `EndSession(sessionId)`
+  - `StartMeasuring(sessionId)` / `StopMeasuring`: ストリーミング開始/停止、検出器リセット
   - `ObserveConnection`: 接続状態の監視
-  - `ObserveSwingEvents`: `frames` を検出器に流し、確定イベントをUIへ
-  - `SaveSwing`: SwingEvent を永続化
+  - `ObserveSwingEvents(sessionId)`: `frames`→検出→`SwingEvent`/`Raw` を保存しUIへ通知
 
 ---
 
@@ -102,14 +183,24 @@ interface SettingsRepository {
 - 実装クラス例: `Wt9011BleAdapter` が `SensorStreamPort` と `ConnectionStatePort` を実装
 - 役割
   - スキャン/接続/再接続の状態管理（明示的な状態遷移とタイムアウト）
-  - GATT 購読（200 Hz 目安）→ バイト列デコード → `SensorSample`
+  - GATT 購読（200 Hz 目安、実測は可変）→ バイト列デコード → `SensorSample`
   - 単位変換: 角速度 deg/s → rad/s、加速度 g → m/s²（必要時）
   - バックプレッシャ: `buffer(capacity = Channel.CONFLATED)` で最新値優先
   - 例外と切断: 再試行ポリシ、ユーザー誘導（権限/設定）
+  - `SensorStreamPort.startStreaming()/stopStreaming()` を提供し明示的に制御
 
 - 権限/設定
   - Bluetooth 有効化、位置情報権限（OSバージョンごとの要件を UI で誘導）
   - フォアグラウンド版では画面表示中のみ購読（ライフサイクルに追従）
+
+---
+
+## 時刻・単位ポリシー
+
+- タイムスタンプは `timestampMicros: Long`（μs）。サンプルレートは可変を許容
+- 角速度は rad/s、加速度は m/s² へ正規化（Adapter層で変換）
+- 持続条件（`tRise`/`tFall`）は時間ベースで判定（ms→μs換算）
+- 将来拡張: `SampleClockPort` 等でドリフト補正/補間に対応（v1は未実装）
 
 ---
 
@@ -175,13 +266,17 @@ fun tipSpeedNoAtt(gyroDegSamples: List<Vec3>, radiusMeters: Float, gain: Float =
 ## データ永続化（Room）
 
 - エンティティ（最小）
+  - `swing_sessions`:
+    - `id`（PK）、`user_id`、`bat_profile_id`、`started_at`、`ended_at?`、`note?`
   - `swing_events`:
-    - `id`（PK）、`startedAt`, `endedAt`, `wPerpMax`, `tipSpeed`, `userId?`, `batProfileId?`
-  - 将来: `users`, `bat_profiles` を追加し正規化
+    - `id`（PK）、`session_id`、`started_at`、`ended_at`、`w_perp_max`、`tip_speed`、`impact_angle?`、`created_at`
+  - `swing_raw_samples`:
+    - `id`（PK）、`event_id`、`t_rel_us`、`ax`、`ay`、`az`、`gx`、`gy`、`gz`
+  - 参照: 詳細は `docs/er_model.md`
 
 - Repository 実装
-  - `SwingRepository` を Room で実装し、一覧 `Flow` と保存 `suspend` を提供
-  - 最低限のインデックスを付与（時刻、ユーザー）
+  - `SessionRepository` / `SwingEventRepository` / `RawSampleRepository` を Room で実装
+  - インデックス例: セッション（`user_id, started_at`）、イベント（`session_id, started_at`）、Raw（`event_id, t_rel_us` UNIQUE）
 
 ---
 
@@ -194,7 +289,7 @@ fun tipSpeedNoAtt(gyroDegSamples: List<Vec3>, radiusMeters: Float, gain: Float =
 
 - Modules
   - `BleModule`: `SensorStreamPort`/`ConnectionStatePort` 実装の提供
-  - `RepositoryModule`: `SwingRepository`/`SettingsRepository` 実装の提供
+  - `RepositoryModule`: `SessionRepository` / `SwingEventRepository` / `RawSampleRepository` / `SettingsRepository` 実装の提供
   - `UseCaseModule`: 各 UseCase のファクトリ
   - `CoroutineModule`: `DispatcherProvider`
 
@@ -237,8 +332,9 @@ fun tipSpeedNoAtt(gyroDegSamples: List<Vec3>, radiusMeters: Float, gain: Float =
 
 - 本書に以下が含まれている
   - 全体アーキテクチャとパッケージ構成
-  - WT9011DCL BLE 抽象化とストリーム設計
-  - スイング検出エンジン（閾値・状態機械）の要点
+  - 主要ドメインモデル/ポート（Session/Event/Raw＋μs時刻）
+  - WT9011DCL BLE 抽象化とストリーム設計（start/stop、単位変換、可変Hz）
+  - スイング検出エンジン（閾値・時間窓・不変条件）の要点
   - UI/MVI 風状態管理、Room 永続化、Hilt DI
   - テスト戦略（ユニット/プロパティ/ゴールデン/契約）
   - v1 の制約（フォアグラウンド限定）と将来拡張の方針
