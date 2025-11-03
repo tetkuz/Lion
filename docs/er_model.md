@@ -9,8 +9,19 @@
 - Raw センサデータは「スイング期間のみ」保存（イベント開始〜終了内）。常時記録は行わない（将来拡張で検討）
 - セッション導入：計測開始/終了で `SwingSession` を作成し、複数 `SwingEvent` を内包
 - 複数ユーザー/バット切替に対応（ユーザー別に `BatProfile` を保持）
-- 設定値（閾値・フィルタ・補正係数）は DataStore 管理（ER外）。バット幾何は `BatProfile` に保存
-- 時刻は epoch millis（INTEGER）。長さ/速度/角速度などは SI 単位（REAL）
+- **設定管理の分離**
+  - **DataStore 管理**（ER外）：`SwingSettings`（検出用の閾値・フィルタパラメータ）
+    - `start_threshold_A`、`end_threshold_A`、`end_threshold_W` など
+    - アプリ単位で1セット。ユーザー毎の切り替えは v2 以降の検討対象
+  - **Room DB 管理**：`BatProfile`（バット幾何・補正係数）
+    - `length_m`、`d_hand_m`、`d_sweet_m`、`gain` など
+    - ユーザー毎に複数保持可能
+- **時刻保存**: epoch millis（INTEGER）
+  - DB層での保存単位は millis で効率化
+  - ドメイン層ではマイクロ秒（μs）で扱う（詳細は `docs/architecture.md` の「時刻・単位ポリシー」参照）
+  - Adapter層（RawSampleRepository等）で双方向変換を実施
+- 相対時刻 `t_rel_us`（イベント先頭からの相対）はマイクロ秒で保存（精度が必要）
+- 長さ/速度/角速度などは SI 単位（REAL）
 
 ---
 
@@ -54,12 +65,15 @@
 - カラム
   - `id` INTEGER PK
   - `session_id` INTEGER NOT NULL FK → swing_sessions(id)
-  - `started_at` INTEGER NOT NULL
-  - `ended_at` INTEGER NOT NULL
-  - `w_perp_max` REAL NOT NULL   // rad/s（Z 自転除外の直交成分）
-  - `tip_speed` REAL NOT NULL    // m/s（R×w_perp_max×gain）
-  - `impact_angle` REAL NULL     // 任意：インパクト近傍の角度
-  - `created_at` INTEGER NOT NULL
+  - `started_at` INTEGER NOT NULL (epoch millis)
+  - `ended_at` INTEGER NOT NULL (epoch millis)
+  - `sample_rate_hz` REAL NOT NULL   // イベント期間内のサンプリングレート [Hz]
+    - 後処理（グラフ表示、デシメート計算）に必要
+    - WT9011DCL は通常 200 Hz だが、可変対応の為に記録
+  - `w_perp_max` REAL NOT NULL       // rad/s（Z 自転除外の直交成分）
+  - `tip_speed` REAL NOT NULL        // m/s（R×w_perp_max×gain）
+  - `impact_angle` REAL NULL         // 任意：インパクト近傍の角度推定値
+  - `created_at` INTEGER NOT NULL (epoch millis)
 
 5) swing_raw_samples
 

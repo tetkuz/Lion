@@ -64,6 +64,23 @@ R = d_sweet − d_hand
 
 補正係数1.1は、体幹や前腕の並進運動による寄与を統計的に補う経験的値とする（後日キャリブレーションにより調整可能）。
 
+#### 補正係数（gain）の管理方針
+
+* **デフォルト値**
+  * 初期値: `gain = 1.1`（経験的値）
+  * 根拠: 複数の被験者による計測・検証で得られた統計値
+
+* **ユーザー調整**
+  * BatProfile の `gain` パラメータとして管理
+  * SettingsScreen でスライダー操作（0.8～1.3 範囲）で微調整可能
+  * プロファイル毎・ユーザー毎に独立して保持（DB管理）
+
+* **キャリブレーション（将来拡張）**
+  * v1: 手動調整のみ
+  * v2以降: 自動キャリブレーション機能を検討
+    * 既知の速度基準（例: 高速カメラ映像）と計測値の比較
+    * 統計学的フィッティング → 推奨 gain 値を提示
+
 #### 出力例
 
 * 最大角速度：12.5 rad/s
@@ -252,6 +269,29 @@ if (!swinging) {
     * 将来的に他のセンサーに対応するために、デバイス依存の部分とそうでない部分が切り離されていること
 
 
+# 5.5 v1.0 のスコープと制約（Scope & Constraints）
+
+## フォアグラウンド限定運用
+
+本ドキュメントおよび `architecture.md` で定義される v1.0 は、以下の制約の下で実装される：
+
+* **計測はフォアグラウンド（画面 ON）中のみ**: BLE接続・センサストリーミング・スイング検出は、アプリがフォアグラウンドにある場合のみ実施
+* **画面のロック・別アプリ切替時**: 自動で計測停止。ユーザーがアプリに戻ると再開
+* **理由**: 
+  - BLE ストリーミングは消費電力大（バッテリー配慮）
+  - v1 は機能最小化で安定性重視
+  - ForegroundService 実装コストが高いため、将来実装へ延期
+
+## 将来拡張の方針
+
+* **v1.5–v2.0**: ForegroundService 対応
+  - 画面がロック/別アプリ切替後も計測継続（通知チャンネル表示）
+  - WorkManager で再起動時の自動復旧
+  - バッテリー配慮: 一定時間の非検出で自動停止
+
+* **他センサー対応**: Adapter パターンにより、BLE デバイスを差し替え可能に設計
+
+
 # 6. プラットフォーム / バージョン要件（Android）
 
 本アプリの対応およびビルド設定は Gradle 構成に基づき、以下の通りとする。
@@ -269,3 +309,42 @@ if (!swinging) {
 備考:
 - minSdk 33 を前提に BLE 権限やランタイム権限の取り扱いを設計する
 - targetSdk / compileSdk を更新する際は、各種権限・バックグラウンド挙動の互換性検証を行う
+
+## 必要な権限（Android 13+）
+
+### BLE スキャン・接続
+
+| 権限 | 説明 | 要件 | 用途 |
+|------|------|------|------|
+| **BLUETOOTH_SCAN** | BLE スキャン | Runtime Permission | `BluetoothLeScanner.startScan()` |
+| **BLUETOOTH_CONNECT** | BLE 接続 | Runtime Permission | デバイスペアリング・接続 |
+
+### 位置情報権限
+
+| 権限 | 説明 | 要件 | 理由 |
+|------|------|------|------|
+| **ACCESS_FINE_LOCATION** | 高精度位置情報 | Runtime Permission（推奨） | 一部デバイス/FW で BLE スキャン結果が位置情報に依存することがある |
+| **ACCESS_COARSE_LOCATION** | 粗い位置情報 | Runtime Permission（代替） | 低消費電力版。FINE が拒否された場合の代替 |
+
+### Permission ガード
+
+- **ユーザー初回起動時**: ConnectScreen でモーダル/シートで権限要求
+  - 「Bluetooth: デバイス接続用」
+  - 「位置情報: センサースキャン用」
+  - 「詳細」リンクで背景説明表示
+- **実装**: `androidx.activity.result.ActivityResultContracts.RequestMultiplePermissions`
+- **拒否時対応**:
+  - 一時的拒否: 再度要求
+  - 永続的拒否: 設定アプリへのリンク表示
+
+### AndroidManifest.xml
+
+```xml
+<!-- 宣言 -->
+<uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+<!-- タグ: neverForLocation で位置情報として使用しないことを宣言 -->
+<uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+    android:usesPermissionFlags="neverForLocation" />
+```

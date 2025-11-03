@@ -60,16 +60,31 @@ NavHost(navController, startDestination = "connect") {
 
 - 表示
   - ステータス: `isScanning`, `isConnected`, 権限状態（Bluetooth/位置情報）
-  - デバイスリスト（RSSI/名称/接続可否）
+  - デバイスリスト
+    - 各アイテム: `DeviceItem` データ構造
+      - `address`: BLE MAC address （例: "AA:BB:CC:DD:EE:FF"）
+      - `name`: BLE advertisement name （null の場合は「不明」と表示）
+      - `rssi`: 信号強度 [dBm]（UI では 1–5 段階のシグナルバー表示）
+      - `isConnectable`: 接続可能フラグ
+      - `lastSeenAtMillis`: リスト更新（古いものは薄表示/削除）
+    - リスト更新：スキャン中は 1–2 秒毎に更新（新規/消失デバイスを反映）
 - 操作（UiEvent）
-  - `StartScan`, `StopScan`, `RequestPermission`, `Connect(device)`, `Disconnect`
+  - `StartScan`, `StopScan`, `RequestPermission`, `Connect(address: String)`, `Disconnect`
 - 状態（UiState 一例）
   - `devices: List<DeviceItem>`、`isScanning: Boolean`、`permissionState: PermissionState`、`error: String?`
 - 遷移
   - 接続成功→ `Measure`
 - ガード/エラー
-  - 権限未許可→シート/ダイアログで誘導
-  - 接続失敗/タイムアウト→トースト＋再試行
+  - **権限未許可フロー** (`requirements_specification.md` 参照)
+    - 初回起動時: `RequestPermission` イベント発火
+    - ダイアログ表示: 「Bluetooth デバイス接続に必要」「位置情報: スキャン補助」
+    - ユーザー選択:
+      - 「許可」: 各権限 Runtime Permission 要求
+      - 「詳細」: 背景説明を表示
+      - 「スキップ」: ConnectScreen に留まり、権限表示は常時
+    - 権限取得後: 自動でスキャン開始
+    - 永続拒否: 「設定アプリを開く」ボタン表示
+  - **接続失敗/タイムアウト**: トースト＋「再試行」ボタン表示
 
 ### MeasureScreen
 
@@ -109,12 +124,27 @@ NavHost(navController, startDestination = "connect") {
 
 ### SettingsScreen
 
-- 表示/操作
-  - バットプロファイル: `name`, `length_m`, `d_hand_m`, `d_sweet_m`, `gain`
-  - ユーザー切替/作成、プロファイルの追加/編集/削除
-  - 表示単位: 入力は cm、保存は m。速度は km/h 表示（内部 m/s）
+- 表示構成
+  - **ユーザー選択**: ドロップダウン + 「新規作成」ボタン
+  - **バットプロファイルリスト**: 現在のユーザーが所持するプロファイル一覧
+  - **編集フォーム**: 選択プロファイル編集時に表示
+- バットプロファイル入力フィールド（`requirements_specification.md` 参照）
+  - `name`: テキスト入力フィールド
+  - `length_m` (L): 数値入力フィールド + ドロップダウン（プリセット）
+    - 単位: cm（UI）→ m（DB保存）
+    - 範囲: 60–90 cm
+  - `d_hand_m` (d_hand): スライダー + リアルタイム数値表示
+    - 単位: cm（UI）→ m（DB保存）
+    - 範囲: 0–30 cm、スナップ: 5mm単位
+  - `d_sweet_m` (d_sweet): スライダー + リアルタイム数値表示
+    - 単位: cm（UI）→ m（DB保存）
+    - 範囲: 40–80 cm、スナップ: 5mm単位
+  - `gain`: スライダー + リアルタイム数値表示
+    - 範囲: 0.8–1.3、スナップ: 0.05 単位
+    - デフォルト: 1.1
 - 操作（UiEvent）
   - `SaveBatProfile(profile)`, `SwitchUser(userId)`, `CreateProfile`, `DeleteProfile(id)`
+  - `UpdateFieldValue(fieldName, value)`（リアルタイム入力反映用）
 - 状態（UiState 一例）
   - `profiles: List<BatProfile>`, `currentUser: User`, `editing: BatProfile?`, `saving: Boolean`
 
@@ -126,13 +156,17 @@ NavHost(navController, startDestination = "connect") {
   - `eventId`
 - 表示
   - 時系列グラフ: `W⊥(t)`, `A(t)`, `tip_speed(t) = W⊥(t)×R×gain`
-  - メタ情報: 最高速度/ピーク時刻/サンプル数/`sample_rate_hz`
+  - メタ情報: 最高速度/ピーク時刻/サンプル数/記録時 `sample_rate_hz`
 - データ
   - `swing_raw_samples`（`event_id`、`t_rel_us`）を取得
+  - `sample_rate_hz` をDBから取得し、デシメート戦略を決定
+    - 200 Hz の場合：デシメート不要（そのままプロット）
+    - 1000 Hz の場合：5倍デシメート（200 Hz相当に）
   - `W⊥(t) = sqrt(ωx² + ωy²)`（内部は rad/s 推奨。deg/sなら変換）
   - `A(t)` は重力除去・スムージング（初期は軽い移動平均でも可）
 - パフォーマンス
-  - グラフ描画用にデシメート（例: 1000Hz→200Hz）
+  - グラフ描画用にデシメート（例: Raw Hz → 200Hz 目安）
+    - `decimationFactor = ceil(sample_rate_hz / 200f)` で動的決定
   - `t_rel_us` を秒へ変換して x 軸に使用
 - 操作（UiEvent）
   - `Load(eventId)`, `SetSmoothing(windowMs)`, `ToggleSeries(Wperp|A|TipSpeed)`
