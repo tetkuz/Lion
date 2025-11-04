@@ -381,4 +381,3 @@ fun tipSpeedNoAtt(gyroDegSamples: List<Vec3>, radiusMeters: Float, gain: Float =
 
 - ViewModel 契約
   - `StateFlow<UiState>`: 接続状態、計測状態、最新値、エラー、進行中フラグ
-  - `
