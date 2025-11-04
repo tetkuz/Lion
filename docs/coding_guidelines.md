@@ -7,6 +7,7 @@
 **参照ドキュメント**:
 - `docs/architecture.md` - アーキテクチャ設計
 - `docs/requirements_specification.md` - 要件定義
+- `docs/testing_strategy.md` - テスト戦略
 - [Kotlin Coding Conventions](https://kotlinlang.org/docs/coding-conventions.html)
 - [Android Kotlin Style Guide](https://developer.android.com/kotlin/style-guide)
 

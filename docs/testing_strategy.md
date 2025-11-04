@@ -39,9 +39,9 @@
 
 | 種別 | 対象 | ツール | 実行環境 | 目標カバレッジ |
 |------|------|--------|----------|----------------|
-| 単体テスト | Domain層（UseCase/Entity/純粋ロジック） | JUnit5, Kotest | JVM | 90%以上 |
-| 統合テスト | Data層（Repository/DAO/BLE） | JUnit4, Robolectric, Instrumented | Android/実機 | 70%以上 |
-| UIテスト | Compose Screen | Compose Testing | Android/実機 | 60%以上（主要画面） |
+| 単体テスト | Domain層（UseCase/Entity/純粋ロジック） | JUnit4, Kotlin Test | JVM | 90%以上 |
+| 統合テスト | Data層（Repository/DAO/BLE） | JUnit4, AndroidX Test, Robolectric | Android/実機 | 70%以上 |
+| UIテスト | Compose Screen | Compose Testing, AndroidX Test | Android/実機 | 60%以上（主要画面） |
 | E2Eテスト | アプリ全体フロー | Espresso, UI Automator | 実機 | 主要5シナリオ |
 | パフォーマンステスト | BLE ストリーム、DB書き込み | Macrobenchmark, Profiler | 実機 | 閾値監視 |
 

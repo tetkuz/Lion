@@ -681,95 +681,79 @@ object CoreModule {
 
 ## 11. テストとデバッグ
 
-### 11.1 Port モック化（単体テスト）
+> **注**: 全体的なテスト戦略・方針・カバレッジ目標については `docs/testing_strategy.md` を参照してください。
+> 本セクションは BLE 統合固有のテストポイントと注意事項のみを記載します。
 
+### 11.1 BLE 統合テストの重点項目
+
+BLE Adapter（`Wt9011BleAdapter`）のテストでは、以下の項目を重点的に検証する：
+
+| 項目 | テスト方法 | 検証内容 |
+|------|-----------|---------|
+| **スキャン** | 実機統合テスト | デバイス検出、RSSI取得、タイムアウト処理 |
+| **接続** | 実機統合テスト | GATT接続、サービス発見、再接続 |
+| **ストリーミング** | 実機統合テスト | 200 Hz データ受信、ドロップ率 < 1% |
+| **フレームパース** | 単体テスト | 単位変換（g→m/s², deg/s→rad/s）、境界値 |
+| **エラーハンドリング** | 単体テスト | 権限不足、切断、タイムアウト |
+
+### 11.2 FrameParser 単体テストの注意点
+
+**重要な検証項目**:
 ```kotlin
-// test/domain/usecase/ObserveSwingEventsUseCaseTest.kt
-class FakeSensorStreamPort : SensorStreamPort {
-    private val _frames = MutableSharedFlow<SensorSample>()
-    override val frames: Flow<SensorSample> = _frames.asSharedFlow()
+// test/data/ble/FrameParserTest.kt
+@Test
+fun `加速度の単位変換が正しい（g → m_s²）`() {
+    // Given: 1g の加速度（0x2000 = 8192）
+    val frame = createFrame(accelZ = 0x2000)
 
-    suspend fun emitSample(sample: SensorSample) {
-        _frames.emit(sample)
-    }
+    // When
+    val result = parser.parse(frame)
 
-    override suspend fun startStreaming() { /* no-op */ }
-    override suspend fun stopStreaming() { /* no-op */ }
+    // Then: 1g ≈ 9.8 m/s²
+    assertEquals(9.8f, result!!.accel.z, 0.1f)
 }
 
 @Test
-fun `スイング検出が正しく動作する`() = runTest {
-    val fakePort = FakeSensorStreamPort()
-    val useCase = ObserveSwingEventsUseCase(fakePort, /* ... */)
+fun `角速度の単位変換が正しい（deg_s → rad_s）`() {
+    // Given: 2000 deg/s（0x7FFF = 32767）
+    val frame = createFrame(gyroX = 0x7FFF)
 
-    // テストデータ投入
-    fakePort.emitSample(SensorSample(
-        timestampMicros = 1000000,
-        accel = Vec3(0f, 0f, 9.8f),
-        gyroRadPerSec = Vec3(0f, 0f, 0f)
-    ))
+    // When
+    val result = parser.parse(frame)
 
-    // 検証
-    // ...
+    // Then: 2000 deg/s ≈ 34.9 rad/s
+    val expected = 2000f * (Math.PI.toFloat() / 180f)
+    assertEquals(expected, result!!.gyroRadPerSec.x, 0.1f)
 }
 ```
 
-### 11.2 FrameParser 単体テスト
+**境界値テスト**:
+- リトルエンディアン変換（`readInt16()`）
+- 符号付き16bit整数の最大/最小値（±32767）
+- ゼロ除算の防止
 
+**完全なテストコード例**: `docs/testing_strategy.md` セクション3.2を参照
+
+### 11.3 BLE 統合テストの実機要件
+
+**前提条件**:
+- 実機に WT9011DCL デバイスが近くにあること
+- Bluetooth 権限が許可済み
+- `@RequiresDevice` アノテーションで実機必須を明示
+
+**パフォーマンステスト**:
 ```kotlin
-// test/data/ble/FrameParserTest.kt
-class FrameParserTest {
-    private val parser = FrameParser()
-
-    @Test
-    fun `0x61フレームを正しくパースする`() {
-        // WT9011DCL の実データ例（16進数）
-        val frame = byteArrayOf(
-            0x55.toByte(), 0x61.toByte(),  // ヘッダ + Flag
-            0x00, 0x00, 0x00, 0x00, 0xE8.toByte(), 0x03,  // 加速度 (例: 0, 0, 1g)
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // 角速度 (例: 0, 0, 0)
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00   // 角度（v1未使用）
-        )
-
-        val result = parser.parse(frame)
-
-        assertNotNull(result)
-        assertEquals(9.8f, result!!.accel.z, 0.1f)  // 1g ≈ 9.8 m/s²
-        assertEquals(0f, result.gyroRadPerSec.x, 0.01f)
-    }
-
-    @Test
-    fun `不正なヘッダはnullを返す`() {
-        val invalidFrame = byteArrayOf(0xAA.toByte(), 0x61.toByte())
-        assertNull(parser.parse(invalidFrame))
-    }
-}
-```
-
-### 11.3 統合テスト（Instrumented Test）
-
-```kotlin
-// androidTest/data/ble/Wt9011BleAdapterTest.kt
-@RunWith(AndroidJUnit4::class)
-class Wt9011BleAdapterTest {
-    @Test
-    fun デバイススキャンが動作する() = runTest {
-        val adapter = Wt9011BleAdapter(
-            ApplicationProvider.getApplicationContext(),
-            TestDispatcherProvider()
-        )
-
-        adapter.startScan()
-        delay(5000) // 5秒スキャン
-        adapter.stopScan()
-
-        val devices = adapter.scannedDevices.value
-        assertTrue(devices.isNotEmpty())
-    }
+@Test
+@RequiresDevice
+fun `200Hz で 1% 以下のドロップ率`() = runTest {
+    // 10秒間で 2000 サンプル期待
+    // 完全な実装例は docs/testing_strategy.md セクション5.1 参照
 }
 ```
 
 ### 11.4 デバッグログ
+
+デバッグ時は以下のログポイントを有効化する：
 
 ```kotlin
 // data/ble/Wt9011BleAdapter.kt
@@ -782,10 +766,17 @@ private fun logFrame(payload: ByteArray) {
 ```
 
 **推奨ログポイント**:
-- GATT 接続/切断イベント
-- 受信フレーム（最初の数バイトのみ）
+- GATT 接続/切断イベント（状態遷移）
+- 受信フレーム（最初の数バイトのみ、高頻度のためサンプリング推奨）
 - パースエラー（チェックサム失敗、不明Flag）
 - コマンド送信（unlock/save/setRate）
+- 再接続試行（リトライ回数、待機時間）
+
+**ログレベル**:
+- `VERBOSE`: 全フレーム（パフォーマンステスト時のみ）
+- `DEBUG`: 接続イベント、コマンド送信
+- `WARN`: パースエラー、再接続
+- `ERROR`: 致命的エラー（権限不足、デバイス未検出）
 
 ---
 
@@ -828,9 +819,13 @@ private fun logFrame(payload: ByteArray) {
 
 ### 12.6 テスト
 
-- [ ] `FrameParserTest` 作成（単位変換検証）
-- [ ] `FakeSensorStreamPort` 作成（UseCase テスト用）
-- [ ] 統合テスト（実機での BLE 接続確認）
+> **詳細**: `docs/testing_strategy.md` を参照
+
+BLE 統合固有のテスト項目：
+- [ ] `FrameParserTest` 作成（単位変換検証: g→m/s², deg/s→rad/s）
+- [ ] BLE 統合テスト（実機：スキャン、接続、200Hzストリーム）
+- [ ] パフォーマンステスト（ドロップ率 < 1%）
+- [ ] エラーハンドリングテスト（権限不足、切断、タイムアウト）
 
 ### 12.7 パフォーマンス
 

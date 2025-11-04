@@ -2,7 +2,7 @@
 
 本ドキュメントは、`docs/requirements_specification.md` に定義された要件を満たすための実装指針を示す。初期バージョンは Jetpack Compose を用いたフォアグラウンド計測に限定し、将来的な ForegroundService 対応や他センサー拡張の方針も併記する。
 
-- 参照: `docs/requirements_specification.md`
+- 参照: `docs/requirements_specification.md`、`docs/testing_strategy.md`
 - アーキテクチャ原則: MVVM + Ports/Adapters、単方向データフロー、Hilt による依存性注入、Coroutines/Flow、中核ロジックの純粋化による高いテスタビリティ
 
 ---
